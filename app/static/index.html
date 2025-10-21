@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chrome 沙箱管理平台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Chrome 沙箱管理平台</h1>
+      <p>按需创建隔离的浏览器沙箱、自动登录并提取 Cookie。</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>创建沙箱</h2>
+        <form id="create-form">
+          <div class="field">
+            <label for="count">沙箱数量</label>
+            <input type="number" id="count" name="count" min="1" value="1" required />
+          </div>
+
+          <div class="field">
+            <label for="default-url">默认打开链接</label>
+            <input type="url" id="default-url" name="default_url" placeholder="https://example.com" required />
+          </div>
+
+          <div class="field checkbox">
+            <input type="checkbox" id="google-login" name="google_login" checked />
+            <label for="google-login">启用谷歌账号自动登录</label>
+          </div>
+
+          <div class="field checkbox">
+            <input type="checkbox" id="site-login" name="auto_site_login" checked />
+            <label for="site-login">尝试在目标网站使用谷歌账号登录</label>
+          </div>
+
+          <div class="field">
+            <label for="accounts">谷歌账号列表</label>
+            <textarea
+              id="accounts"
+              name="accounts"
+              rows="6"
+              placeholder="每行一个账号，例如：\nuser@example.com-Password-restore@example.com"
+            ></textarea>
+            <small>支持 -, ;, 空格等多种分隔符。顺序需为邮箱-密码-辅助邮箱。</small>
+          </div>
+
+          <button type="submit">创建沙箱</button>
+          <p class="status" id="create-status"></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>沙箱列表</h2>
+          <button id="refresh-btn" class="secondary">刷新</button>
+        </div>
+        <div id="sandbox-table-wrapper">
+          <table id="sandbox-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>邮箱</th>
+                <th>状态</th>
+                <th>默认链接</th>
+                <th>Cookie</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <template id="sandbox-row">
+      <tr>
+        <td class="mono" data-field="id"></td>
+        <td data-field="email"></td>
+        <td data-field="status"></td>
+        <td data-field="default_url"></td>
+        <td data-field="cookie"></td>
+        <td class="actions"></td>
+      </tr>
+    </template>
+
+    <script src="/static/main.js"></script>
+  </body>
+</html>
