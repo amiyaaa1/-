@@ -1,0 +1,222 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", "PingFang SC", system-ui, sans-serif;
+  background: #f5f7fb;
+  color: #1f2933;
+}
+
+body {
+  margin: 0;
+}
+
+.top-bar {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  padding: 1.5rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 20px rgba(37, 99, 235, 0.3);
+}
+
+.top-bar h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.status-pill {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 0.4rem 1.2rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+
+.layout {
+  display: grid;
+  gap: 1.5rem;
+  padding: 2rem;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 15px 35px rgba(15, 23, 42, 0.12);
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1.3rem;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  color: #334155;
+  gap: 0.4rem;
+}
+
+.form-grid input,
+.form-grid textarea {
+  border-radius: 10px;
+  border: 1px solid #d1d9e6;
+  padding: 0.7rem 0.9rem;
+  font-size: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-grid input:focus,
+.form-grid textarea:focus {
+  border-color: #2563eb;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+  font-weight: 500;
+}
+
+.checkbox input {
+  margin-right: 0.6rem;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+button {
+  border: none;
+  cursor: pointer;
+  border-radius: 10px;
+  font-size: 1rem;
+  padding: 0.7rem 1.2rem;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+button.primary,
+.primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.25);
+}
+
+button.ghost {
+  background: rgba(99, 102, 241, 0.08);
+  color: #1d4ed8;
+}
+
+button.danger {
+  background: linear-gradient(135deg, #f97316, #ef4444);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(239, 68, 68, 0.25);
+}
+
+.list {
+  display: grid;
+  gap: 1rem;
+}
+
+.sandbox-card,
+.cookie-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1rem 1.2rem;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(148, 163, 184, 0.16);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.8rem;
+  gap: 1rem;
+}
+
+.status {
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+.error,
+.status-pill.error {
+  color: #dc2626;
+}
+
+.status-pill.error {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.message {
+  margin: 0.4rem 0;
+  color: #475569;
+}
+
+.logs {
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: "JetBrains Mono", monospace;
+  padding: 0.8rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  max-height: 160px;
+  overflow: auto;
+  line-height: 1.4;
+}
+
+.logs p {
+  margin: 0.2rem 0;
+}
+
+.cookie-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cookie-card h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.cookie-card .meta {
+  margin: 0.2rem 0 0;
+  color: #475569;
+}
+
+.meta {
+  margin: 0.2rem 0;
+  color: #64748b;
+}
+
+@media (min-width: 960px) {
+  .layout {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .panel:first-of-type {
+    grid-row: span 2;
+  }
+}
