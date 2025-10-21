@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 class AccountCredential(BaseModel):
@@ -21,7 +21,8 @@ class SandboxCreateRequest(BaseModel):
         None, description="批量账号字符串，每行一个账号，可使用-或;分隔"
     )
 
-    @validator("accounts_blob", pre=True)
+    @field_validator("accounts_blob", mode="before")
+    @classmethod
     def normalize_empty(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None

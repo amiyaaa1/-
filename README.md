@@ -47,7 +47,7 @@ $env:SANDBOX_CHROME_BINARY = 'D:\\tools\\chrome-win\\chrome.exe'
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-启动成功后，终端会显示 `Uvicorn running on http://127.0.0.1:8000`。在浏览器访问该地址即可打开前端页面。
+启动成功后，终端会显示 `Uvicorn running on http://127.0.0.1:8000`。请在浏览器访问 `http://127.0.0.1:8000/`（或 `http://localhost:8000/`），不要直接输入 `http://0.0.0.0:8000/`，否则可能出现 `HTTP ERROR 502`。
 
 ### 3. 前端使用说明
 

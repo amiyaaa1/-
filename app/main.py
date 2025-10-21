@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -72,12 +72,17 @@ async def create_sandboxes(request: SandboxCreateRequest) -> SandboxListResponse
     return SandboxListResponse(sandboxes=created)
 
 
-@app.delete("/api/sandboxes/{sandbox_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_sandbox(sandbox_id: str) -> None:
+@app.delete(
+    "/api/sandboxes/{sandbox_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_sandbox(sandbox_id: str) -> Response:
     try:
         await manager.remove_sandbox(sandbox_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/sandboxes/{sandbox_id}", response_model=SandboxInfo)
