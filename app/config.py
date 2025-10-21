@@ -9,4 +9,4 @@ PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 COOKIE_DIR.mkdir(parents=True, exist_ok=True)
 
 HEADLESS = os.getenv("SANDBOX_HEADLESS", "true").lower() != "false"
-BROWSER_CHANNEL = os.getenv("SANDBOX_BROWSER_CHANNEL", "chromium")
+CHROME_BINARY = os.getenv("SANDBOX_CHROME_BINARY")

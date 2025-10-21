@@ -5,8 +5,9 @@ import contextlib
 import json
 import logging
 import os
-import re
 import shutil
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,14 +15,24 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
-from playwright.async_api import BrowserContext, Error as PlaywrightError, Page, async_playwright
+from selenium import webdriver
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    NoSuchElementException,
+    TimeoutException,
+    WebDriverException,
+)
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from . import config
 from .schemas import AccountCredential, SandboxInfo
 from .utils import ensure_directory, parse_accounts_blob, sanitize_filename
 
 logger = logging.getLogger(__name__)
-
 
 SITE_TRIGGER_KEYWORDS = [
     "登录",
@@ -59,31 +70,28 @@ class SandboxSession:
     logs: List[str] = field(default_factory=list)
     cookie_file: Optional[str] = None
 
-    _context: Optional[BrowserContext] = field(default=None, init=False, repr=False)
-    _page: Optional[Page] = field(default=None, init=False, repr=False)
     _task: Optional[asyncio.Task] = field(default=None, init=False, repr=False)
-    _stop_event: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
+    _driver: Optional[webdriver.Chrome] = field(default=None, init=False, repr=False)
+    _stop_flag: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _log_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
-    async def start(self, playwright, headless: bool) -> None:
+    async def start(self, headless: bool) -> None:
         if self._task and not self._task.done():
             return
-        self._task = asyncio.create_task(self._run(playwright, headless))
+        self._stop_flag.clear()
+        self._task = asyncio.create_task(self._run_async(headless=headless))
 
     async def stop(self) -> None:
-        self._stop_event.set()
+        self._stop_flag.set()
+        driver = self._driver
+        if driver is not None:
+            await asyncio.to_thread(self._safe_quit_driver)
         if self._task:
-            self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-        if self._page:
-            with contextlib.suppress(PlaywrightError):
-                await self._page.close()
-        if self._context:
-            with contextlib.suppress(PlaywrightError):
-                await self._context.close()
+            self._task = None
         if self.profile_dir.exists():
-            with contextlib.suppress(Exception):
-                shutil.rmtree(self.profile_dir, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, self.profile_dir, True)
         self.status = "stopped"
         self.message = "沙箱已停止"
         self.log("沙箱已停止")
@@ -96,9 +104,10 @@ class SandboxSession:
     def log(self, text: str) -> None:
         timestamp = datetime.utcnow().strftime("%H:%M:%S")
         entry = f"[{timestamp}] {text}"
-        self.logs.append(entry)
-        if len(self.logs) > 200:
-            self.logs = self.logs[-200:]
+        with self._log_lock:
+            self.logs.append(entry)
+            if len(self.logs) > 200:
+                self.logs = self.logs[-200:]
         logger.info("%s: %s", self.id, text)
 
     def to_dict(self) -> SandboxInfo:
@@ -115,56 +124,85 @@ class SandboxSession:
             logs=list(self.logs[-20:]),
         )
 
-    async def _run(self, playwright, headless: bool) -> None:
+    async def _run_async(self, headless: bool) -> None:
+        try:
+            await asyncio.to_thread(self._run_blocking, headless)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if not self._stop_flag.is_set():
+                self._update_status("error", f"沙箱运行失败: {exc}")
+                self.log(f"错误: {exc}")
+
+    def _run_blocking(self, headless: bool) -> None:
+        driver: Optional[webdriver.Chrome] = None
         try:
             ensure_directory(self.profile_dir)
             self._update_status("launching", "正在启动浏览器沙箱")
-            launch_args = ["--disable-dev-shm-usage"]
-            if os.geteuid() == 0:
-                launch_args.append("--no-sandbox")
+            options = ChromeOptions()
+            options.add_argument(f"--user-data-dir={self.profile_dir}")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--window-size=1280,720")
+            if headless:
+                options.add_argument("--headless=new")
+            if os.name != "nt":
+                try:
+                    if os.geteuid() == 0:
+                        options.add_argument("--no-sandbox")
+                except AttributeError:
+                    pass
+            if config.CHROME_BINARY:
+                options.binary_location = config.CHROME_BINARY
+                self.log(f"使用自定义 Chrome 路径: {config.CHROME_BINARY}")
 
-            browser_type = playwright.chromium
-            channel = config.BROWSER_CHANNEL if config.BROWSER_CHANNEL != "chromium" else None
-            if channel:
-                self.log(f"使用浏览器通道: {channel}")
-
-            self._context = await browser_type.launch_persistent_context(
-                user_data_dir=str(self.profile_dir),
-                headless=headless,
-                channel=channel,
-                args=launch_args,
-            )
-            self._page = await self._context.new_page()
+            driver = webdriver.Chrome(options=options)
+            driver.set_page_load_timeout(90)
+            self._driver = driver
             self._update_status("launched", "浏览器沙箱已启动")
 
-            if self.enable_google_login and self.account:
-                logged_in = await self._perform_google_login()
-            else:
-                logged_in = False
+            logged_in = False
+            if self.enable_google_login and self.account and not self._stop_flag.is_set():
+                logged_in = self._perform_google_login(driver)
 
-            if self.target_url:
-                await self._open_target_url()
+            if self.target_url and not self._stop_flag.is_set():
+                self._open_target_url(driver)
                 if (
                     self.auto_site_login
                     and self.enable_google_login
                     and logged_in
                     and self.account is not None
+                    and not self._stop_flag.is_set()
                 ):
-                    await self._try_site_google_login()
+                    self._try_site_google_login(driver)
 
-            if self._page:
-                await self._page.wait_for_load_state("networkidle")
-                await asyncio.sleep(2)
-                await self._save_cookies()
-            self._update_status("ready", "自动化流程完成，沙箱保持运行")
-        except asyncio.CancelledError:
-            self.log("沙箱任务被取消")
-            raise
+            if not self._stop_flag.is_set():
+                self._save_cookies(driver)
+                self._update_status("ready", "自动化流程完成，沙箱保持运行")
+
+            while not self._stop_flag.wait(timeout=1):
+                if self._driver is None:
+                    break
+        except WebDriverException as exc:
+            if not self._stop_flag.is_set():
+                self._update_status("error", f"浏览器异常: {exc}")
+                self.log(f"浏览器异常: {exc}")
         except Exception as exc:
-            self._update_status("error", f"沙箱运行失败: {exc}")
-            self.log(f"错误: {exc}")
+            if not self._stop_flag.is_set():
+                self._update_status("error", f"沙箱运行失败: {exc}")
+                self.log(f"错误: {exc}")
         finally:
-            self._stop_event.set()
+            if driver is not None:
+                with contextlib.suppress(Exception):
+                    driver.quit()
+            self._driver = None
+
+    def _safe_quit_driver(self) -> None:
+        driver = self._driver
+        if driver is not None:
+            with contextlib.suppress(Exception):
+                driver.quit()
+        self._driver = None
 
     def _update_status(self, status: str, message: Optional[str] = None) -> None:
         self.status = status
@@ -172,146 +210,183 @@ class SandboxSession:
             self.message = message
             self.log(message)
 
-    async def _perform_google_login(self) -> bool:
-        assert self._page is not None
-        self._update_status("google_login", "正在尝试谷歌登录")
-        page = self._page
+    def _perform_google_login(self, driver: webdriver.Chrome) -> bool:
+        assert self.account is not None
         try:
-            await page.goto(
-                "https://accounts.google.com/signin/v2/identifier?hl=zh-CN&flowName=GlifWebSignIn",
-                wait_until="domcontentloaded",
+            self._update_status("google_login", "正在尝试谷歌登录")
+            driver.get(
+                "https://accounts.google.com/signin/v2/identifier?hl=zh-CN&flowName=GlifWebSignIn"
             )
-            await page.fill('input[type="email"]', self.account.email)
-            await page.click('#identifierNext button, #identifierNext div[role="button"], #identifierNext')
-            await page.wait_for_timeout(1000)
-            await page.wait_for_selector('input[type="password"]', timeout=30000)
-            await page.fill('input[type="password"]', self.account.password)
-            await page.click('#passwordNext button, #passwordNext div[role="button"], #passwordNext')
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(1)
+            wait = WebDriverWait(driver, 30)
+            email_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="email"]')))
+            email_input.clear()
+            email_input.send_keys(self.account.email)
+            wait.until(EC.element_to_be_clickable((By.ID, "identifierNext"))).click()
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="password"]')))
+            password_input = driver.find_element(By.CSS_SELECTOR, 'input[type="password"]')
+            password_input.clear()
+            password_input.send_keys(self.account.password)
+            wait.until(EC.element_to_be_clickable((By.ID, "passwordNext"))).click()
+            time.sleep(2)
 
-            # 处理可能的恢复邮箱验证
+            if self.account.recovery_email:
+                try:
+                    recovery_input = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="email"]'))
+                    )
+                    page_text = driver.page_source.lower()
+                    if "恢复" in page_text or "recovery" in page_text:
+                        recovery_input.clear()
+                        recovery_input.send_keys(self.account.recovery_email)
+                        recovery_input.send_keys(Keys.ENTER)
+                        time.sleep(2)
+                except TimeoutException:
+                    pass
+
             try:
-                recovery_selector = 'input[type="email"]'
-                recovery_box = page.locator(recovery_selector)
-                if await recovery_box.count() > 0:
-                    body_text = await page.locator("body").inner_text()
-                    if re.search("恢复邮箱|recovery email|verify", body_text, re.IGNORECASE):
-                        if self.account.recovery_email:
-                            await recovery_box.fill(self.account.recovery_email)
-                            await page.click('button:has-text("下一步"), button:has-text("Next"), div[role="button"]:has-text("Next")')
-                            await page.wait_for_load_state("networkidle", timeout=30000)
-            except PlaywrightError as recovery_err:
-                self.log(f"恢复邮箱步骤跳过: {recovery_err}")
-
+                wait.until(lambda d: "signin" not in d.current_url or self._stop_flag.is_set())
+            except TimeoutException:
+                pass
             self.log("谷歌账号登录完成")
             return True
         except Exception as exc:
-            self.log(f"谷歌登录失败: {exc}")
+            if not self._stop_flag.is_set():
+                self.log(f"谷歌登录失败: {exc}")
             return False
 
-    async def _open_target_url(self) -> None:
-        assert self._page is not None
-        if not self.target_url:
-            return
+    def _open_target_url(self, driver: webdriver.Chrome) -> None:
+        assert self.target_url is not None
         self._update_status("opening", f"正在打开: {self.target_url}")
         try:
-            await self._page.goto(self.target_url, wait_until="domcontentloaded")
-            await self._page.wait_for_load_state("networkidle")
+            driver.get(self.target_url)
+            WebDriverWait(driver, 30).until(lambda d: d.execute_script("return document.readyState") == "complete")
+            time.sleep(1)
             self.log("目标页面加载完成")
         except Exception as exc:
-            self.log(f"打开目标页面失败: {exc}")
+            if not self._stop_flag.is_set():
+                self.log(f"打开目标页面失败: {exc}")
 
-    async def _try_site_google_login(self) -> None:
-        assert self._page is not None
+    def _try_site_google_login(self, driver: webdriver.Chrome) -> None:
         self._update_status("site_login", "检测目标站点的谷歌登录入口")
-        page = self._page
         try:
-            triggered = await self._trigger_login_options(page)
+            triggered = self._trigger_login_options(driver)
             if triggered:
-                await page.wait_for_timeout(1500)
-            await self._click_google_login(page)
+                time.sleep(1.5)
+            self._click_google_login(driver)
         except Exception as exc:
-            self.log(f"站点谷歌登录过程失败: {exc}")
+            if not self._stop_flag.is_set():
+                self.log(f"站点谷歌登录过程失败: {exc}")
 
-    async def _trigger_login_options(self, page: Page) -> bool:
-        triggered = False
-        for keyword in SITE_TRIGGER_KEYWORDS:
-            try:
-                locator = page.get_by_role("link", name=re.compile(keyword, re.IGNORECASE))
-                if await locator.count() == 0:
-                    locator = page.get_by_role("button", name=re.compile(keyword, re.IGNORECASE))
-                if await locator.count() == 0:
-                    locator = page.locator(f"text=/.*{re.escape(keyword)}.*/i")
-                if await locator.count() > 0:
-                    await locator.first.click()
-                    await page.wait_for_timeout(800)
-                    triggered = True
-                    self.log(f"点击触发元素: {keyword}")
-                    break
-            except PlaywrightError:
+    def _trigger_login_options(self, driver: webdriver.Chrome) -> bool:
+        clickable = driver.find_elements(By.CSS_SELECTOR, "a, button, [role='button']")
+        for element in clickable:
+            if not element.is_displayed():
                 continue
-        return triggered
+            label = (element.text or "").strip()
+            if not label:
+                label = (element.get_attribute("aria-label") or "").strip()
+            if not label:
+                continue
+            label_lower = label.lower()
+            for keyword in SITE_TRIGGER_KEYWORDS:
+                key_lower = keyword.lower()
+                if key_lower in label_lower or keyword in label:
+                    try:
+                        element.click()
+                        self.log(f"点击触发元素: {keyword}")
+                        return True
+                    except (ElementClickInterceptedException, WebDriverException):
+                        continue
+        return False
 
-    async def _click_google_login(self, page: Page) -> None:
-        google_popup: Optional[Page] = None
-        async def wait_for_popup():
-            nonlocal google_popup
-            try:
-                google_popup = await page.context.wait_for_event("page", timeout=8000)
-            except PlaywrightError:
-                google_popup = None
+    def _find_clickable_by_keyword(self, driver: webdriver.Chrome, keyword: str):
+        locator_css = [
+            (By.CSS_SELECTOR, "button"),
+            (By.CSS_SELECTOR, "a"),
+            (By.CSS_SELECTOR, "[role='button']"),
+        ]
+        keyword_lower = keyword.lower()
+        for by, selector in locator_css:
+            elements = driver.find_elements(by, selector)
+            for element in elements:
+                if not element.is_displayed():
+                    continue
+                text = (element.text or "").strip()
+                if not text:
+                    text = (element.get_attribute("aria-label") or "").strip()
+                if not text:
+                    continue
+                text_lower = text.lower()
+                if keyword_lower in text_lower or keyword in text:
+                    return element
+        return None
 
-        popup_task = asyncio.create_task(wait_for_popup())
+    def _click_google_login(self, driver: webdriver.Chrome) -> None:
+        original_handle = driver.current_window_handle
+        handles_before = set(driver.window_handles)
         clicked = False
         for keyword in GOOGLE_LOGIN_KEYWORDS:
-            locator = page.get_by_role("button", name=re.compile(keyword, re.IGNORECASE))
-            if await locator.count() == 0:
-                locator = page.locator(f"text=/.*{re.escape(keyword)}.*/i")
-            if await locator.count() > 0:
-                await locator.first.click()
-                clicked = True
+            element = self._find_clickable_by_keyword(driver, keyword)
+            if element is None:
+                continue
+            try:
+                element.click()
                 self.log(f"点击Google登录按钮: {keyword}")
+                clicked = True
                 break
+            except (ElementClickInterceptedException, WebDriverException) as exc:
+                self.log(f"点击 Google 登录按钮失败 ({keyword}): {exc}")
         if not clicked:
-            popup_task.cancel()
             return
 
+        time.sleep(2)
+        handles_after = set(driver.window_handles)
+        new_handles = [handle for handle in handles_after if handle not in handles_before]
+        for handle in new_handles:
+            self._handle_google_popup(driver, handle, original_handle)
+
+        driver.switch_to.window(original_handle)
         try:
-            await popup_task
-        except asyncio.CancelledError:
+            WebDriverWait(driver, 15).until(lambda d: d.current_url != "about:blank")
+        except TimeoutException:
             pass
 
-        if google_popup:
-            await google_popup.wait_for_load_state("domcontentloaded")
-            await self._handle_google_popup(google_popup)
-        await page.wait_for_load_state("networkidle")
-        await asyncio.sleep(1)
-
-    async def _handle_google_popup(self, popup: Page) -> None:
+    def _handle_google_popup(self, driver: webdriver.Chrome, popup_handle: str, original_handle: str) -> None:
         try:
-            locator = popup.locator('div[data-identifier], div[role="link"]')
-            if await locator.count() > 0 and self.account:
-                matching = locator.filter(has_text=re.compile(re.escape(self.account.email), re.IGNORECASE))
-                if await matching.count() > 0:
-                    await matching.first.click()
-                    self.log("在弹窗中选择了谷歌账号")
-                else:
-                    await locator.first.click()
-                    self.log("在弹窗中选择默认谷歌账号")
-            await popup.wait_for_timeout(2000)
-        except PlaywrightError as exc:
-            self.log(f"弹窗处理失败: {exc}")
+            driver.switch_to.window(popup_handle)
+            time.sleep(1)
+            if self.account:
+                selectors = [
+                    (By.XPATH, f"//div[contains(@data-identifier, '{self.account.email}')]"),
+                    (By.XPATH, f"//div[contains(text(), '{self.account.email}')]"),
+                    (By.CSS_SELECTOR, 'div[role="link"]'),
+                ]
+                for by, selector in selectors:
+                    try:
+                        candidates = driver.find_elements(by, selector)
+                    except NoSuchElementException:
+                        candidates = []
+                    if candidates:
+                        candidates[0].click()
+                        self.log("在弹窗中选择了谷歌账号")
+                        break
+            time.sleep(2)
+        except WebDriverException as exc:
+            if not self._stop_flag.is_set():
+                self.log(f"弹窗处理失败: {exc}")
         finally:
-            try:
-                await popup.close()
-            except PlaywrightError:
-                pass
+            with contextlib.suppress(WebDriverException):
+                driver.close()
+            driver.switch_to.window(original_handle)
 
-    async def _save_cookies(self) -> None:
-        assert self._context is not None and self._page is not None
-        cookies = await self._context.cookies()
-        url = self._page.url
+    def _save_cookies(self, driver: webdriver.Chrome) -> None:
+        try:
+            cookies = driver.get_cookies()
+        except WebDriverException as exc:
+            if not self._stop_flag.is_set():
+                self.log(f"获取 Cookie 失败: {exc}")
+            return
+        url = driver.current_url
         parsed = urlparse(url)
         domain = parsed.hostname or "unknown"
         email_part = self.account.email if self.account else "anonymous"
@@ -331,14 +406,11 @@ class SandboxSession:
 
 class SandboxManager:
     def __init__(self) -> None:
-        self._playwright = None
         self._sandboxes: Dict[str, SandboxSession] = {}
         self._lock = asyncio.Lock()
 
     async def startup(self) -> None:
-        if self._playwright is None:
-            self._playwright = await async_playwright().start()
-            logger.info("Playwright 已启动")
+        logger.info("SandboxManager 启动完成")
 
     async def shutdown(self) -> None:
         async with self._lock:
@@ -346,10 +418,7 @@ class SandboxManager:
             self._sandboxes.clear()
         for sandbox in sandboxes:
             await sandbox.stop()
-        if self._playwright is not None:
-            await self._playwright.stop()
-            self._playwright = None
-            logger.info("Playwright 已关闭")
+        logger.info("SandboxManager 已关闭")
 
     async def create_sandboxes(
         self,
@@ -359,9 +428,6 @@ class SandboxManager:
         auto_site_login: bool,
         accounts_blob: Optional[str],
     ) -> List[SandboxSession]:
-        if self._playwright is None:
-            raise RuntimeError("Playwright 尚未初始化")
-
         accounts = parse_accounts_blob(accounts_blob)
         if enable_google_login and len(accounts) < count:
             raise ValueError("谷歌账号数量不足以分配给所有沙箱")
@@ -382,7 +448,7 @@ class SandboxManager:
                 created.append(sandbox)
 
         for sandbox in created:
-            await sandbox.start(self._playwright, config.HEADLESS)
+            await sandbox.start(config.HEADLESS)
 
         return created
 

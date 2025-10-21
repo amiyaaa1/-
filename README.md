@@ -1,6 +1,6 @@
 # Chrome 沙箱自动化平台
 
-本项目提供一个基于 FastAPI + Playwright 的可视化平台，可以批量启动相互隔离的 Chrome 浏览器沙箱，自动完成谷歌登录、站点谷歌登录识别以及 Cookie 抓取，并提供前端页面统一管理。
+本项目提供一个基于 FastAPI + Selenium 的可视化平台，可以批量启动相互隔离的 Chrome 浏览器沙箱，自动完成谷歌登录、站点谷歌登录识别以及 Cookie 抓取，并提供前端页面统一管理。整个方案直接调用系统中的 Google Chrome（或自定义路径的便携版），无需安装 Microsoft Visual C++ 运行库即可使用。
 
 ## 功能概览
 
@@ -19,7 +19,8 @@
 ### 1. 安装依赖
 
 1. 安装 [Python 3.10+](https://www.python.org/downloads/)，并在安装向导中勾选 “Add Python to PATH”。
-2. （可选）安装 [Git](https://git-scm.com/download/win) 以便克隆仓库。
+2. 安装或准备好可执行的 Google Chrome（支持便携版）。若使用便携版，可通过环境变量告知项目可执行文件路径。
+3. （可选）安装 [Git](https://git-scm.com/download/win) 以便克隆仓库。
 
 ```powershell
 # 克隆仓库（或直接下载压缩包解压）
@@ -30,14 +31,14 @@ cd <your-repo-folder>
 python -m venv .venv
 .\.venv\Scripts\activate
 
-# 安装后端依赖
+# 安装后端依赖（无需 Microsoft Visual C++）
 pip install -r requirements.txt
 
-# 安装 Playwright 对应的浏览器内核
-playwright install chromium
+# （可选）设置便携版 Chrome 路径，仅当前终端有效
+$env:SANDBOX_CHROME_BINARY = 'D:\\tools\\chrome-win\\chrome.exe'
 ```
 
-> **提示**：如果希望使用本机已安装的 Google Chrome，可设置环境变量 `SANDBOX_BROWSER_CHANNEL=chrome`。
+> **提示**：Selenium 会自动下载匹配版本的 ChromeDriver，只需保证 Chrome 可执行文件可用。如需手动指定 Chrome 路径，请设置 `SANDBOX_CHROME_BINARY` 环境变量。
 
 ### 2. 启动服务
 
@@ -66,7 +67,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### 5. 常见问题
 
-- **浏览器未显示？** 默认使用 Playwright 提供的 Chromium，无需额外界面。如果要查看真实窗口，可设置环境变量 `SANDBOX_HEADLESS=false` 并确保系统具备图形环境。
+- **浏览器未显示？** 默认以无头模式启动 Chrome。如需查看真实窗口，可设置环境变量 `SANDBOX_HEADLESS=false` 并确保系统具备图形界面。
 - **谷歌登录失败？** 谷歌对于自动化登录可能触发风控，建议准备备用账号、开启辅助邮箱，并根据日志定位问题。
 - **Cookie 文件为空？** 确保目标站点在登录完成后已跳转到登录后的页面，系统会在网络空闲后再保存 Cookie。
 
