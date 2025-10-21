@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chrome 沙箱自动化平台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Chrome 沙箱自动化平台</h1>
+      <section>
+        <article>
+          <h2>启动新的沙箱任务</h2>
+          <form id="launch-form">
+            <div class="grid">
+              <label>
+                沙箱数量
+                <input type="number" name="count" id="count" value="1" min="1" required />
+              </label>
+              <label>
+                默认打开链接
+                <input type="url" name="start_url" id="start_url" placeholder="https://example.com" required />
+              </label>
+            </div>
+            <label>
+              谷歌账号批量输入
+              <textarea
+                name="accounts_raw"
+                id="accounts_raw"
+                rows="6"
+                placeholder="示例：\nexample@gmail.com-Password-restore@example.com"
+              ></textarea>
+            </label>
+            <fieldset>
+              <label>
+                <input type="checkbox" name="enable_google_login" id="enable_google_login" />
+                启用谷歌账号自动登录
+              </label>
+              <label>
+                <input type="checkbox" name="enable_site_google_registration" id="enable_site_google_registration" />
+                登录目标站点时尝试使用谷歌账号注册/登录
+              </label>
+              <label>
+                <input type="checkbox" name="headless" id="headless" />
+                使用无头模式运行浏览器
+              </label>
+            </fieldset>
+            <button type="submit">启动沙箱</button>
+          </form>
+        </article>
+      </section>
+      <section>
+        <article>
+          <div class="status-header">
+            <h2>沙箱运行状态</h2>
+            <button id="refresh-btn" class="secondary">刷新</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>沙箱ID</th>
+                  <th>账号</th>
+                  <th>目标链接</th>
+                  <th>当前域名</th>
+                  <th>状态</th>
+                  <th>消息</th>
+                  <th>Cookie</th>
+                </tr>
+              </thead>
+              <tbody id="sandbox-table-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>

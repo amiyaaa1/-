@@ -1,0 +1,26 @@
+body {
+  background: #f5f6fa;
+}
+
+main {
+  padding: 2rem 0;
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+}
+
+textarea {
+  font-family: monospace;
+}
