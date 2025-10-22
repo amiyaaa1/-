@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -426,22 +426,33 @@ class SandboxManager:
             raise
 
     def _backup_sqlite_db(self, source: Path, destination: Path) -> None:
-        uri = self._build_sqlite_uri(source)
-        src_conn = sqlite3.connect(uri, uri=True)
-        try:
-            dest_conn = sqlite3.connect(destination)
+        last_error: Optional[Exception] = None
+        for immutable in (True, False):
+            uri = self._build_sqlite_uri(source, immutable=immutable)
+            src_conn: Optional[sqlite3.Connection] = None
+            dest_conn: Optional[sqlite3.Connection] = None
             try:
+                src_conn = sqlite3.connect(uri, uri=True)
+                dest_conn = sqlite3.connect(str(destination))
                 src_conn.backup(dest_conn)
+                return
+            except sqlite3.Error as exc:
+                last_error = exc
             finally:
-                dest_conn.close()
-        finally:
-            src_conn.close()
+                if dest_conn is not None:
+                    dest_conn.close()
+                if src_conn is not None:
+                    src_conn.close()
+        if last_error:
+            raise last_error
 
-    def _build_sqlite_uri(self, path: Path) -> str:
+    def _build_sqlite_uri(self, path: Path, immutable: bool = True) -> str:
         resolved = path.resolve()
-        normalized = str(resolved).replace("\\", "/")
-        quoted = quote(normalized, safe="/:")
-        return f"file:{quoted}?mode=ro&immutable=1"
+        base_uri = resolved.as_uri()
+        query = ["mode=ro"]
+        if immutable:
+            query.append("immutable=1")
+        return f"{base_uri}?{'&'.join(query)}"
 
     def _safe_unlink(self, path: Optional[Path]) -> None:
         if not path:
