@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -275,18 +275,17 @@ class SandboxManager:
             if not cookie_db:
                 continue
 
-            fd, temp_name = tempfile.mkstemp(suffix=".db")
-            os.close(fd)
-            temp_copy = Path(temp_name)
+            temp_copy: Optional[Path] = None
             try:
-                shutil.copy2(cookie_db, temp_copy)
+                temp_copy = self._create_temp_copy(cookie_db)
+            except Exception as exc:
+                print(f"复制 {cookie_db} 时失败：{exc}")
+                continue
+
+            try:
                 collected.extend(self._read_cookie_db(temp_copy, key, domain, profile_dir))
             finally:
-                try:
-                    temp_copy.unlink(missing_ok=True)
-                except TypeError:
-                    if temp_copy.exists():
-                        temp_copy.unlink()
+                self._safe_unlink(temp_copy)
 
         if not collected:
             return None
@@ -404,6 +403,56 @@ class SandboxManager:
         invalid = '<>:\"/\\|?*'
         sanitized = "".join("_" if ch in invalid else ch for ch in name)
         return sanitized or "domain"
+
+    def _create_temp_copy(self, source: Path) -> Path:
+        fd, temp_name = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        temp_copy = Path(temp_name)
+        try:
+            shutil.copy2(source, temp_copy)
+            return temp_copy
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) == 32:
+                try:
+                    self._backup_sqlite_db(source, temp_copy)
+                    return temp_copy
+                except Exception:
+                    self._safe_unlink(temp_copy)
+                    raise
+            self._safe_unlink(temp_copy)
+            raise
+        except Exception:
+            self._safe_unlink(temp_copy)
+            raise
+
+    def _backup_sqlite_db(self, source: Path, destination: Path) -> None:
+        uri = self._build_sqlite_uri(source)
+        src_conn = sqlite3.connect(uri, uri=True)
+        try:
+            dest_conn = sqlite3.connect(destination)
+            try:
+                src_conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+        finally:
+            src_conn.close()
+
+    def _build_sqlite_uri(self, path: Path) -> str:
+        resolved = path.resolve()
+        normalized = str(resolved).replace("\\", "/")
+        quoted = quote(normalized, safe="/:")
+        return f"file:{quoted}?mode=ro&immutable=1"
+
+    def _safe_unlink(self, path: Optional[Path]) -> None:
+        if not path:
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except TypeError:
+            if path.exists():
+                path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def load_config() -> Dict[str, object]:
