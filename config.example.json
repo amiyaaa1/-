@@ -1,0 +1,8 @@
+{
+  "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "use_incognito": false,
+  "default_urls": [
+    "https://www.google.com"
+  ],
+  "cookie_output_dir": "D:\\ai translate\\cookie"
+}
