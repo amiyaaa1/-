@@ -1,0 +1,230 @@
+# Kiro 自动注册脚本项目
+
+该仓库提供一个可执行的 Python 自动化项目，用于在 Windows 本机上批量完成 Kiro 桌面端的登录/注册流程，并在凭证生成后自动归档 AWS SSO 缓存文件。
+
+## 快速开始
+
+1. **准备运行环境**（Windows 10/11）：
+   ```powershell
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+2. **复制并编辑配置文件**：
+   ```powershell
+   copy config.example.yaml config.yaml
+   ```
+   根据自身账号、路径及登录模式修改 `config.yaml`。
+3. **运行自动化脚本**：
+   ```powershell
+   python main.py --config config.yaml --log-level INFO
+   ```
+   主循环会按 `config.yaml` 中的 `max_cycles` 和 `cycle_sleep` 控制执行次数与节奏，可随时使用 `Ctrl+C` 停止。
+
+> ⚠️ **注意**：脚本依赖 `pywinauto` 控制 Windows GUI、`selenium` 控制 Chrome 浏览器、`psutil` 检测 Kiro 与浏览器进程。首次运行前需确保本机已安装 Chrome，并允许 Selenium 启动对应浏览器驱动。
+
+## 本地部署流程
+
+以下步骤基于干净的 Windows 工作站，帮助你从零搭建可执行环境：
+
+1. **克隆仓库**
+   ```powershell
+   git clone https://example.com/your/kiro-automation.git
+   cd kiro-automation
+   ```
+
+2. **创建隔离运行环境**
+   - 推荐使用 `python -m venv .venv` 创建虚拟环境，也可以使用 Conda。
+   - 激活虚拟环境后执行 `pip install --upgrade pip`，再安装 `requirements.txt` 中的依赖。
+
+3. **准备浏览器与驱动**
+   - 确保本地安装稳定版本的 Chrome，并保持与自动化依赖兼容。
+   - 若使用 Selenium，首次运行会自动下载 ChromeDriver；若网络受限，可提前手动下载并放入系统 PATH。
+
+4. **复制并填写配置**
+   - 将 `config.example.yaml` 复制为 `config.yaml`。
+   - 填写 Kiro.exe 路径、缓存目录、归档目录、登录模式、Google 账号或临时邮箱 API Key 等信息。
+   - 如需保护敏感字段，可结合 `.env` 或 Windows Credential Manager，并在配置解析时读取。
+
+5. **准备临时邮箱服务（仅 AWS 分支需要）**
+   - 使用提供的 API Key 调用 `/api/config` 确认可用域名。
+   - 在 `config.yaml` 中写入 `base_url`、`api_key`、`default_domain`、`mailbox_prefix` 等字段。
+
+6. **执行首次端到端联调**
+   ```powershell
+   python main.py --config config.yaml --log-level DEBUG
+   ```
+   - 观察终端日志，确认 Kiro 启动、浏览器授权、缓存剪切均能成功执行。
+
+7. **配置长期运行**
+   - 可在 Windows 任务计划程序中新增计划任务，调用虚拟环境下的 Python 解释器执行 `main.py`。
+   - 建议重定向日志：`python main.py --config config.yaml >> run.log 2>&1`，便于持续监控。
+
+8. **后续升级与维护**
+   - 更新代码时运行 `git pull`，并重新执行 `pip install -r requirements.txt` 以同步依赖。
+   - 定期清理归档目录、检查配置中的账号与 API Key 是否仍有效。
+
+# 项目方案概述
+
+## 1. 项目目标
+- 使用本地已安装的 `Kiro.exe` 客户端，在无人值守的情况下批量完成注册/登录。
+- 支持两种登录方式的自动化分支：`Sign in with Google` 与 `Sign in with AWS Builder ID`。
+- 自动生成或读取所需邮箱、密码、验证码信息，并处理登录过程中的交互提示。
+- 当 Kiro 完成授权登录并生成凭证后，自动从 `C:\Users\ZTX\\.aws\\sso\\cache` 目录中读取新生成的缓存文件，按照命名规则重命名并剪切到目标目录 `D:\ai translate\kirofd\gmail`。
+- 整个流程以循环方式运行：每次完成注册后重新初始化 Kiro 客户端，确保 Kiro 返回未登录状态并重新开始下一次注册。
+
+## 2. 运行环境与依赖建议
+- **操作系统**：Windows 10/11。
+- **Python 版本**：建议 3.10 及以上。
+- **必备依赖库**（可通过 `pip install -r requirements.txt` 统一安装）：
+  - `pywinauto`：启动并控制 Windows GUI 程序（Kiro.exe）及窗口检测。
+  - `psutil`：判断 Kiro 进程状态、执行循环重启。
+  - `selenium` 或 `playwright`：控制 Chrome 浏览器，在无痕模式下执行 OAuth 登录流程。
+  - `webdriver-manager`（若使用 Selenium）：自动管理 ChromeDriver。
+  - `requests`：调用临时邮箱 API、轮询验证码邮件。
+  - `pyyaml` 或 `pydantic`：读取项目配置文件（邮箱、路径、API Key 等）。
+  - `watchdog`：监控 `.aws\sso\cache` 目录变化，捕获最新凭证文件。
+  - `rich`：控制台日志与进度输出。
+  - `tenacity`：处理重试逻辑（网络或 UI 操作失败时重试）。
+- **外部依赖**：
+  - 已安装 Chrome 浏览器。
+  - Chrome 启动参数需支持无痕模式与远程调试。
+  - 临时邮箱服务 API（zyramail）凭证，包含 `BASE_URL`、`API_KEY`、可用域名。
+
+## 3. 配置管理
+- 建议在项目根目录放置 `config.yaml`，包含：
+  ```yaml
+  kiro_exe_path: "D:/ai translate/Kiro/Kiro.exe"
+  cache_dir: "C:/Users/ZTX/.aws/sso/cache"
+  archive_dir: "D:/ai translate/kirofd/gmail"
+  login_mode: "google"  # 支持 google / aws
+  google_accounts:
+    - email: "example@gmail.com"
+      password: "your_password"
+  aws_password_rule:
+    min_length: 12
+    include_upper: true
+    include_lower: true
+    include_digit: true
+    include_symbol: true
+  temp_mail:
+    base_url: "https://zyramail.work"
+    api_key: "mk_795B_xm-iOH7F5INIER4SNAIUITaY2Eg"
+    default_domain: "moemail.app"
+    mailbox_prefix: "test"
+    expiry_time: 3600000
+  ```
+- 支持在配置中添加多个 Google 邮箱，用于轮询登录。
+- `login_mode` 决定执行哪条分支，后续可扩展为在每次循环中动态切换。
+
+## 4. 顶层工作流程
+1. **初始化**
+   - 解析配置文件，建立日志记录器。
+   - 确认关键路径存在并具有读写权限。
+   - 检查 Kiro 是否已运行，如在运行则结束进程，以免影响首次循环。
+2. **开始主循环**
+   - 循环条件可基于计数、外部控制文件或手动终止（Ctrl+C）。
+   - 每次循环执行以下阶段：
+
+### 阶段 A：启动 Kiro 并选择登录方式
+- 使用 `pywinauto` 启动 `Kiro.exe`。
+- 等待主窗口出现，并检测登录按钮（Google / AWS）。
+- 依据配置执行 `Sign in with Google` 或 `Sign in with AWS Builder ID` 点击动作。
+
+### 阶段 B：浏览器 OAuth 处理
+- **共通步骤**：
+  1. 获取 Kiro 打开的默认浏览器 URL。
+  2. 以 Selenium/Playwright 启动 Chrome，无痕模式 (`--incognito`)，并访问相同链接。
+  3. 关闭 Kiro 打开的原始标签页，确保操作集中在自动化控制窗口。
+  4. 使用显式等待机制等待页面元素。
+
+- **Google 分支**：
+  1. 输入 Google 邮箱与密码；如触发“我了解”提示，定位按钮后点击。
+  2. 在授权页面点击 `Continue`。
+  3. 监测到 "You can close this window" 文案后，记录成功事件。
+
+- **AWS Builder ID 分支**：
+  1. 通过 API 生成临时邮箱地址。
+  2. 在 AWS 页面接受 Cookies，输入生成的邮箱。
+  3. 使用随机姓名（可调用 `faker` 库）填写个人信息。
+  4. 收到验证码邮件：轮询 `/api/emails/{emailId}` 获取最新邮件，解析验证码。
+  5. 设置符合复杂度要求的密码（可使用随机密码生成器，并保存以备后续使用）。
+  6. 在授权页面选择 `Allow access`，等待成功页面。
+
+### 阶段 C：等待凭证写入并处理文件
+- 使用 `watchdog` 监视 `cache_dir`，捕捉新增/修改文件事件。
+- 当检测到新的缓存文件：
+  1. 根据分支命名规则重命名：
+     - Google：`{邮箱名}+kiro`。
+     - AWS：`{邮箱名}+kiro+{随机两位数}`。
+  2. 使用 `shutil.move` 将文件剪切到 `archive_dir`。
+  3. 将操作记录写入日志，并可选择追加到 CSV/JSON 报表，便于审计。
+
+### 阶段 D：清理并准备下一轮
+- 确认 Kiro 已因凭证移除回到登录界面，或主动结束 Kiro 进程。
+- 等待数秒以确保进程完全退出。
+- 返回阶段 A 重新开始。
+
+## 5. 关键模块设计建议
+| 模块 | 主要职责 | 备注 |
+|------|----------|------|
+| `kiro_automation/kiro_launcher.py` | 封装 Kiro 程序启动、关闭、窗口检测 | 基于 `pywinauto.Application` |
+| `kiro_automation/auth_google.py` | 实现 Google 登录自动化 | 处理账号输入、授权确认 |
+| `kiro_automation/auth_aws.py` | 实现 AWS Builder ID 登录自动化 | 集成临时邮箱、验证码解析、密码生成 |
+| `kiro_automation/temp_mail.py` | 临时邮箱 API 封装 | 提供创建邮箱、查询邮件、解析验证码的方法 |
+| `kiro_automation/credential_watcher.py` | 监视缓存目录并迁移文件 | 封装命名策略与文件操作 |
+| `kiro_automation/loop_controller.py` | 管理主循环、异常重试、日志 | 统一错误处理 |
+| `main.py` | CLI 入口 | 负责解析配置并启动循环 |
+
+## 6. 日志与错误处理
+- 使用 `logging` 或 `rich` 输出结构化日志，记录每个步骤状态与耗时。
+- 对于易失败环节（网页加载、验证码接收等）添加超时与重试机制。
+- 在出现不可恢复错误时，自动截图或导出页面 HTML 便于排查。
+
+## 7. 安全与合规注意事项
+- 妥善管理邮箱密码与 API Key，建议使用 `.env` 或 Windows Credential Manager 存储敏感信息。
+- 自动化 Google 登录时，可能触发异常登录警告，需提前为账号设置适当的安全策略（如允许自动化登录、关闭双因素等）。
+- 自动操作 AWS Builder ID 需遵守 AWS 服务条款，避免大规模注册导致账号封禁。
+- 运行过程中产生的日志与凭证文件应限制访问权限，防止泄露。
+
+## 8. 后续扩展方向
+- 增加图形化配置界面，方便切换登录模式与配置参数。
+- 支持并行多实例注册，利用多个浏览器会话加速流程。
+- 引入任务队列（如 `RQ` 或 `Celery`）将流程拆分为独立任务，提升稳定性。
+- 将凭证归档流程拓展为远程存储（如 S3、NAS）。
+
+## 9. 开发步骤建议
+1. 初始化 Python 项目结构，创建虚拟环境与 `requirements.txt`。
+2. 实现配置读取与日志模块，确保全局可用。
+3. 编写 `temp_mail` 模块，完成 API 测试与验证码解析。
+4. 开发 Google 登录分支脚本，验证从启动到授权的完整链路。
+5. 开发 AWS Builder ID 分支，并与临时邮箱模块联调。
+6. 编写凭证监控与文件迁移模块，确保命名与剪切逻辑正确。
+7. 打通主循环，加入异常捕获、重试与终止条件。
+8. 进行端到端测试，记录每次循环的运行日志与凭证结果。
+9. 根据测试反馈完善 README 与配置说明。
+
+## 10. 目录结构
+
+```
+.
+├── config.example.yaml        # 配置示例
+├── main.py                    # CLI 入口
+├── requirements.txt           # 依赖列表
+├── kiro_automation
+│   ├── __init__.py
+│   ├── auth_aws.py
+│   ├── auth_base.py
+│   ├── auth_google.py
+│   ├── browser.py
+│   ├── config.py
+│   ├── credential_watcher.py
+│   ├── exceptions.py
+│   ├── kiro_launcher.py
+│   ├── logging_utils.py
+│   ├── loop_controller.py
+│   ├── password.py
+│   └── temp_mail.py
+└── readme                     # 项目文档
+```
+

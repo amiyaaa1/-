@@ -1,0 +1,22 @@
+# Example configuration for the Kiro automation project
+kiro_exe_path: "D:/ai translate/Kiro/Kiro.exe"
+cache_dir: "C:/Users/ZTX/.aws/sso/cache"
+archive_dir: "D:/ai translate/kirofd/gmail"
+login_mode: "google"  # or "aws"
+google_accounts:
+  - email: "example@gmail.com"
+    password: "your_password"
+aws_password_rule:
+  min_length: 12
+  include_upper: true
+  include_lower: true
+  include_digit: true
+  include_symbol: true
+temp_mail:
+  base_url: "https://zyramail.work"
+  api_key: "mk_795B_xm-iOH7F5INIER4SNAIUITaY2Eg"
+  default_domain: "moemail.app"
+  mailbox_prefix: "test"
+  expiry_time: 3600000
+cycle_sleep: 8
+max_cycles: null

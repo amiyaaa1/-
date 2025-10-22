@@ -1,0 +1,8 @@
+psutil>=5.9
+pywinauto>=0.6
+selenium>=4.19
+requests>=2.31
+PyYAML>=6.0
+rich>=13.0
+webdriver-manager>=4.0
+watchdog>=4.0
