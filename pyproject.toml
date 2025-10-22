@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiro-automation"
+version = "0.1.0"
+description = "Automation toolkit for the Kiro sign-in workflow"
+readme = "README.md"
+authors = [{ name = "Automation" }]
+requires-python = ">=3.11"
+dependencies = [
+    "pywinauto>=0.6",
+    "selenium>=4.10",
+    "watchdog>=3.0",
+    "requests>=2.31",
+    "pyperclip>=1.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0",
+    "ruff>=0.3",
+    "pytest>=7.0",
+]
+
+[tool.setuptools]
+packages = ["kiro_automation"]

@@ -1,0 +1,50 @@
+[paths]
+kiro_executable = "D:\\ai translate\\Kiro\\Kiro.exe"
+sso_cache_dir = "C:\\Users\\ZTX\\.aws\\sso\\cache"
+credential_destination = "D:\\ai translate\\kirofd\\gmail"
+
+[browser]
+driver_path = "C:\\path\\to\\chromedriver.exe"
+binary_path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+incognito = true
+headless = false
+window_size = "1280,900"
+extra_arguments = ["--disable-blink-features=AutomationControlled"]
+
+[browser.patterns]
+google_auth = "accounts.google.com"
+aws_auth = "amazoncognito.com"
+
+[google]
+email = "your-email@gmail.com"
+password = "env:GOOGLE_APP_PASSWORD"
+enabled = true
+clipboard_timeout = 90
+
+[aws]
+domain = "moemail.app"
+mailbox_prefix = "kiro"
+mailbox_expiry = 3600000
+poll_interval = 5
+poll_timeout = 180
+password_length = 16
+password_charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}"
+
+[email_service]
+base_url = "https://zyramail.work"
+api_key = "env:ZYRAMAIL_API_KEY"
+
+[loop]
+strategies = ["google", "aws"]
+max_iterations = 2
+delay_seconds = 15
+continue_on_error = true
+wait_for_credentials = 90
+
+[logging]
+level = "INFO"
+log_directory = "logs"
+
+[auth]
+clipboard_poll_interval = 1.0
+clipboard_timeout = 120

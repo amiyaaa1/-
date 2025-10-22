@@ -1,0 +1,5 @@
+pywinauto>=0.6
+selenium>=4.10
+watchdog>=3.0
+requests>=2.31
+pyperclip>=1.8
