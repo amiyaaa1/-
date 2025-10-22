@@ -1,0 +1,4 @@
+config.json
+session_dirs.json
+__pycache__/
+*.pyc
