@@ -75,13 +75,61 @@ class KiroLauncher:
         if self._app is None:
             raise AutomationError("Kiro is not running; call launch() first")
         try:
+            from pywinauto.findwindows import ElementNotFoundError  # type: ignore
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise AutomationError("pywinauto must be installed to control Kiro") from exc
+
+        try:
             window = self._app.window(best_match="Kiro")
-            window.wait("ready", timeout=10)
-            LOGGER.info("Clicking login button: %s", label)
-            window.child_window(title=label, control_type="Button").click_input()
+            window.wait("visible", timeout=15)
+            window.wait("enabled", timeout=15)
+            window.set_focus()
+
+            control = self._locate_login_control(window, label)
+            if control is None:
+                available = [
+                    f"{ctrl.control_type()}:{ctrl.window_text().strip()}"
+                    for ctrl in window.descendants()
+                    if ctrl.window_text().strip()
+                ][:10]
+                raise AutomationError(
+                    f"Unable to locate login control '{label}'. Known controls: {', '.join(available)}"
+                )
+
+            LOGGER.info("Clicking login control labelled '%s'", control.window_text().strip() or label)
+            control.wait("ready", timeout=5)
+            control.click_input()
             time.sleep(wait)
+        except ElementNotFoundError as exc:
+            raise AutomationError(f"Login control '{label}' not found") from exc
         except Exception as exc:
-            raise AutomationError(f"Unable to click button '{label}': {exc}") from exc
+            raise AutomationError(f"Unable to click login control '{label}': {exc}") from exc
+
+    def _locate_login_control(self, window, label: str):
+        """Search for a clickable control matching the provided label."""
+
+        def normalise(text: str) -> str:
+            cleaned = text.lower().replace("&", "").strip()
+            return " ".join(cleaned.split())
+
+        target = normalise(label)
+
+        search_control_types = ("Button", "Hyperlink", "Text")
+        for ctrl_type in search_control_types:
+            for ctrl in window.descendants(control_type=ctrl_type):
+                text = ctrl.window_text().strip()
+                if not text:
+                    continue
+                normalised_text = normalise(text)
+                if normalised_text == target or target in normalised_text:
+                    return ctrl
+
+        try:
+            fallback = window.child_window(best_match=label)
+            fallback.wait("exists", timeout=3)
+            return fallback
+        except Exception:
+            return None
 
     def ensure_closed(self) -> None:
         """Ensure Kiro is not running before starting a cycle."""
